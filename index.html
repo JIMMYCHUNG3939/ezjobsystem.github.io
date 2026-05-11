@@ -156,10 +156,10 @@ label{font-size:12px;color:#5a6a7e;display:block;margin-bottom:4px;margin-top:10
       <button class="btn btn-sm" onclick="doLogout()">Sign Out</button>
     </div>
   </div>
-  <div class="tabs">
+  <div class="tabs" id="main-tabs">
     <div class="tab active" id="tab-cal" onclick="switchTab('calendar',this)">📅 Calendar</div>
     <div class="tab" id="tab-jobs" onclick="switchTab('jobs',this)">📋 Job List</div>
-    <div class="tab" onclick="openForm(null)" style="color:#185FA5;font-weight:500">＋ New Job</div>
+    <div class="tab" id="tab-new" onclick="openForm(null)" style="color:#185FA5;font-weight:500">＋ New Job</div>
   </div>
   <div class="content" id="content"><div class="empty"><span class="spin spin-dark"></span> Loading...</div></div>
 </div>
@@ -183,12 +183,13 @@ const MONTHS_SHORT=['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT',
 const MONTHS_LONG=['January','February','March','April','May','June','July','August','September','October','November','December'];
 const DAYS=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
 
-let session=null,user=null,userName='',jobs=[],currentTab='calendar';
+let session=null,user=null,userName='',userRole='creator',jobs=[],currentTab='calendar';
 let fStatus='',fPriority='',fDept='';
 let taskCounter=0,taskIds=[];
 let calYear=new Date().getFullYear(),calMonth=new Date().getMonth();
 let selectedDate=null;
 let calFilter='all'; // 'all','installer','transport'
+let userRole='creator'; // 'creator','installer','transport'
 
 function formatDate(d){
   if(!d)return'—';
@@ -230,6 +231,7 @@ async function doLogin(){
   btn.disabled=false;btn.innerHTML='Sign In';
   if(res.error||res.error_description)return showMsg(res.error_description||res.error||'Sign in failed.');
   session=res;user=res.user;userName=user?.user_metadata?.full_name||user?.email||'';
+  userRole=user?.user_metadata?.role||'creator';
   localStorage.setItem('wms_session',JSON.stringify(res));
   enterApp();
 }
@@ -252,36 +254,55 @@ async function doRegister(){
 async function enterApp(){
   document.getElementById('auth-view').classList.add('hidden');
   document.getElementById('app-view').classList.remove('hidden');
-  if(!user?.user_metadata?.full_name){
+  if(!user?.user_metadata?.full_name||!user?.user_metadata?.role){
     showNamePrompt();return;
   }
+  userRole=user?.user_metadata?.role||'creator';
+  // Set default calendar filter based on role
+  if(userRole==='transport')calFilter='transport';
+  else if(userRole==='installer')calFilter='installer';
+  else calFilter='all';
   document.getElementById('user-label').textContent=userName;
+  // Show role badge
+  const roleColors={creator:'#185FA5',installer:'#3B6D11',transport:'#854F0B'};
+  const roleLabels={creator:'Creator',installer:'Installer',transport:'Transport'};
+  document.getElementById('user-label').innerHTML=`${userName} <span style="background:${roleColors[userRole]};color:#fff;font-size:10px;padding:2px 7px;border-radius:99px;margin-left:4px">${roleLabels[userRole]}</span>`;
   await loadJobs();render();
 }
 
 function showNamePrompt(){
   document.getElementById('modal-body').innerHTML=`
     <div style="font-size:17px;font-weight:600;margin-bottom:8px">Welcome! 👋</div>
-    <p style="font-size:13px;color:#5a6a7e;margin-bottom:20px">Please enter your name. This will appear in all jobs you create.</p>
+    <p style="font-size:13px;color:#5a6a7e;margin-bottom:20px">Please enter your name and select your role.</p>
     <label>Your Full Name</label>
-    <input type="text" id="prompt-name" placeholder="e.g. Jimmy Chung" style="margin-bottom:14px" onkeydown="if(event.key==='Enter')saveName()">
+    <input type="text" id="prompt-name" placeholder="e.g. Jimmy Chung" style="margin-bottom:14px">
+    <label>Your Role</label>
+    <select id="prompt-role" style="margin-bottom:14px">
+      <option value="">— Select Role —</option>
+      <option value="creator">Creator</option>
+      <option value="installer">Installer</option>
+      <option value="transport">Transport</option>
+    </select>
     <button class="btn btn-primary" style="width:100%" onclick="saveName()">Continue</button>`;
   document.getElementById('modal').classList.remove('hidden');
 }
 
 async function saveName(){
   const name=document.getElementById('prompt-name').value.trim();
+  const role=document.getElementById('prompt-role').value;
   if(!name)return alert('Please enter your name.');
+  if(!role)return alert('Please select your role.');
   try{
     const r=await fetch(SUPA_URL+'/auth/v1/user',{
       method:'PUT',
       headers:{'Content-Type':'application/json','apikey':SUPA_KEY,'Authorization':'Bearer '+session.access_token},
-      body:JSON.stringify({data:{full_name:name}})
+      body:JSON.stringify({data:{full_name:name,role:role}})
     });
     const data=await r.json();
     if(data.user_metadata?.full_name)userName=data.user_metadata.full_name;
     else userName=name;
-  }catch(e){userName=name;}
+    userRole=role;
+  }catch(e){userName=name;userRole=role;}
   document.getElementById('user-label').textContent=userName;
   closeModal();
   await loadJobs();render();
@@ -309,7 +330,19 @@ function switchTab(tab,el){
   document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
   el.classList.add('active');render();
 }
+function updateTabsVisibility(){
+  const jobsTab=document.getElementById('tab-jobs');
+  const newTab=document.getElementById('tab-new');
+  if(userRole!=='creator'){
+    if(jobsTab)jobsTab.style.display='none';
+    if(newTab)newTab.style.display='none';
+  }else{
+    if(jobsTab)jobsTab.style.display='';
+    if(newTab)newTab.style.display='';
+  }
+}
 function render(){
+  updateTabsVisibility();
   if(currentTab==='calendar'){
     if(selectedDate)renderDayView(selectedDate);
     else renderCalendar();
@@ -386,11 +419,16 @@ function renderCalendar(){
     cells+=`<div class="cal-cell other-month"><div class="cal-date">${d}</div></div>`;
   }
 
-  const filterBar=`<div class="filter-bar">
-    <button class="filter-pill${calFilter==='all'?' fp-active-all':''}" onclick="calFilter='all';renderCalendar()">All</button>
-    <button class="filter-pill${calFilter==='installer'?' fp-active-installer':''}" onclick="calFilter='installer';renderCalendar()">Installer</button>
-    <button class="filter-pill${calFilter==='transport'?' fp-active-transport':''}" onclick="calFilter='transport';renderCalendar()">Transport</button>
-  </div>`;
+  // Build filter bar based on role
+  let filterBtns='';
+  if(userRole==='creator'){
+    filterBtns+=`<button class="filter-pill${calFilter==='all'?' fp-active-all':''}" onclick="calFilter='all';renderCalendar()">All</button>`;
+  }
+  if(userRole==='creator'||userRole==='installer'){
+    filterBtns+=`<button class="filter-pill${calFilter==='installer'?' fp-active-installer':''}" onclick="calFilter='installer';renderCalendar()">Installer</button>`;
+  }
+  filterBtns+=`<button class="filter-pill${calFilter==='transport'?' fp-active-transport':''}" onclick="calFilter='transport';renderCalendar()">Transport</button>`;
+  const filterBar=`<div class="filter-bar">${filterBtns}</div>`;
 
   document.getElementById('content').innerHTML=filterBar+`
     <div class="cal-header">
@@ -524,14 +562,14 @@ function viewJob(id, readOnly=false){
         ${t.remark?`<div style="font-size:11px;color:#5a6a7e;margin-bottom:4px">Remark</div><div class="remark-box">${t.remark}</div>`:''}
       </div>`).join('')}`:''}
 
-    ${!readOnly?`
+    ${(!readOnly&&userRole==='creator')?`
     <div class="section-title">Update Status</div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px">
       ${STATUS.map(s=>`<button class="btn btn-sm${j.status===s.k?' btn-primary':''}" onclick="updateSt('${j.id}','${s.k}')">${s.l}</button>`).join('')}
     </div>`:''}
 
     <div style="display:flex;gap:8px;padding-top:12px;border-top:1px solid #e8edf2">
-      ${!readOnly?`
+      ${(!readOnly&&userRole==='creator')?`
       <button class="btn btn-primary btn-sm" onclick="openForm('${j.id}')">Edit</button>
       <button class="btn btn-sm btn-danger" onclick="delJob('${j.id}')">Delete</button>`:''}
       <button class="btn btn-sm" style="margin-left:auto" onclick="closeModal()">Close</button>
@@ -702,7 +740,7 @@ function closeModal(){document.getElementById('modal').classList.add('hidden')}
     const s=JSON.parse(localStorage.getItem('wms_session'));
     if(s?.access_token){
       const r=await fetch(SUPA_URL+'/auth/v1/user',{headers:{'apikey':SUPA_KEY,'Authorization':'Bearer '+s.access_token}});
-      if(r.ok){user=await r.json();session=s;userName=user?.user_metadata?.full_name||user?.email||'';await enterApp();return;}
+      if(r.ok){user=await r.json();session=s;userName=user?.user_metadata?.full_name||user?.email||'';userRole=user?.user_metadata?.role||'creator';await enterApp();return;}
       localStorage.removeItem('wms_session');
     }
   }catch(e){}
