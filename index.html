@@ -253,9 +253,6 @@ async function doRegister(){
 async function enterApp(){
   document.getElementById('auth-view').classList.add('hidden');
   document.getElementById('app-view').classList.remove('hidden');
-  if(!user?.user_metadata?.full_name||!user?.user_metadata?.role){
-    showNamePrompt();return;
-  }
   userRole=user?.user_metadata?.role||'creator';
   // Set default calendar filter based on role
   if(userRole==='transport')calFilter='transport';
@@ -268,87 +265,6 @@ async function enterApp(){
   document.getElementById('user-label').innerHTML=`${userName} <span style="background:${roleColors[userRole]};color:#fff;font-size:10px;padding:2px 7px;border-radius:99px;margin-left:4px">${roleLabels[userRole]}</span>`;
   await loadJobs();render();
 }
-
-function showNamePrompt(){
-  document.getElementById('modal-body').innerHTML=`
-    <div style="font-size:17px;font-weight:600;margin-bottom:8px">Welcome! 👋</div>
-    <p style="font-size:13px;color:#5a6a7e;margin-bottom:20px">Please enter your name and select your role.</p>
-    <label>Your Full Name</label>
-    <input type="text" id="prompt-name" placeholder="e.g. Jimmy Chung" style="margin-bottom:14px">
-    <label>Your Role</label>
-    <select id="prompt-role" style="margin-bottom:14px">
-      <option value="">— Select Role —</option>
-      <option value="creator">Creator</option>
-      <option value="installer">Installer</option>
-      <option value="transport">Transport</option>
-    </select>
-    <button class="btn btn-primary" style="width:100%" onclick="saveName()">Continue</button>`;
-  document.getElementById('modal').classList.remove('hidden');
-}
-
-async function saveName(){
-  const name=document.getElementById('prompt-name').value.trim();
-  const role=document.getElementById('prompt-role').value;
-  if(!name)return alert('Please enter your name.');
-  if(!role)return alert('Please select your role.');
-  try{
-    const r=await fetch(SUPA_URL+'/auth/v1/user',{
-      method:'PUT',
-      headers:{'Content-Type':'application/json','apikey':SUPA_KEY,'Authorization':'Bearer '+session.access_token},
-      body:JSON.stringify({data:{full_name:name,role:role}})
-    });
-    const data=await r.json();
-    if(data.user_metadata?.full_name)userName=data.user_metadata.full_name;
-    else userName=name;
-    userRole=role;
-  }catch(e){userName=name;userRole=role;}
-  document.getElementById('user-label').textContent=userName;
-  closeModal();
-  await loadJobs();render();
-}
-async function rest(path,opts={}){
-  const tok=session?.access_token||SUPA_KEY;
-  const r=await fetch(SUPA_URL+'/rest/v1'+path,{...opts,headers:{'Content-Type':'application/json','apikey':SUPA_KEY,'Authorization':'Bearer '+tok,'Prefer':'return=representation',...(opts.headers||{})}});
-  const t=await r.text();
-  try{return{ok:r.ok,status:r.status,data:t?JSON.parse(t):null}}catch{return{ok:r.ok,status:r.status,data:t}}
-}
-async function loadJobs(){
-  const r=await rest('/jobs?order=created_at.desc');
-  if(r.ok&&Array.isArray(r.data))jobs=r.data;
-  else jobs=[];
-}
-function doLogout(){
-  session=null;user=null;userName='';jobs=[];
-  localStorage.removeItem('wms_session');
-  document.getElementById('app-view').classList.add('hidden');
-  document.getElementById('auth-view').classList.remove('hidden');
-  document.getElementById('auth-msg').classList.add('hidden');
-}
-function switchTab(tab,el){
-  currentTab=tab;selectedDate=null;
-  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
-  el.classList.add('active');render();
-}
-function updateTabsVisibility(){
-  const jobsTab=document.getElementById('tab-jobs');
-  const newTab=document.getElementById('tab-new');
-  if(userRole!=='creator'){
-    if(jobsTab)jobsTab.style.display='none';
-    if(newTab)newTab.style.display='none';
-  }else{
-    if(jobsTab)jobsTab.style.display='';
-    if(newTab)newTab.style.display='';
-  }
-}
-function render(){
-  updateTabsVisibility();
-  if(currentTab==='calendar'){
-    if(selectedDate)renderDayView(selectedDate);
-    else renderCalendar();
-  }else renderJobs();
-}
-function getSt(k){return STATUS.find(s=>s.k===k)||STATUS[0]}
-function getPr(k){return PRIORITY.find(p=>p.k===k)||PRIORITY[0]}
 
 // ---- CALENDAR ----
 const INSTALLER_JOBS=['Install Equipment','Dismantle Equipment'];
